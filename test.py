@@ -28,7 +28,7 @@ def process_mat(task_name:str) -> pd.DataFrame:
         loc_i = user_i["loc"][()]
         loc_i = np.array(loc_i).flatten()
 
-        # channel: (32, 128) of `numpy.void` type data (e.g.: (-6.51345623e-07, -8.99951125e-07))
+        # channel: (# OFDM symbol, # antenna) of `numpy.void` type data (e.g.: by default (32, 128) size of (-6.51345623e-07, -8.99951125e-07))
         chnl_i = user_i["channel"][()]
         chnl_i = np.array(chnl_i)
 
@@ -37,11 +37,22 @@ def process_mat(task_name:str) -> pd.DataFrame:
     print(df.head())
     print(df.shape)
 
-    # save dataframe to csv
-    # save_path = os.path.join(DATA_PATH, f"{task_name}.csv")
-    # df.to_csv(save_path)
-
     return df
+
+
+"""
+TODO:
+1. how to define channel prediction
+- what is input and output
+
+                                image feature extraction V
+channel parameters prediction --> sensing aided refinition (?) --> channel reconstruction 
+
+- channel parameters: AoD, path gain, path delay, Doppler
+- refine what ??
+- what's the input of channel reconstruction
+
+"""
 
 if __name__ == '__main__':
     df = process_mat("colo_blocked_wireless_dataset")
