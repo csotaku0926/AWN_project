@@ -42,16 +42,21 @@ def process_mat(task_name:str) -> pd.DataFrame:
 
 """
 TODO:
-1. how to define channel prediction
-- what is input and output
+1. User tracking problem definition
 
                                 image feature extraction V
-channel parameters prediction --> sensing aided refinition (?) --> channel reconstruction 
+channel parameters prediction --> sensing aided refinition (?) --> predicted channel states
 
-- channel parameters: AoD, path gain, path delay, Doppler
-- refine what ??
-- what's the input of channel reconstruction
-
+- channel states: 
+    - AoA and AoD -- AoA estimation, [MUSIC algorithm](https://github.com/MarcinWachowiak/music-aoa-estimation-py)
+    - path gain -- compute norm of signal's multipath components
+    - path delay -- FMCW radar principle (??)
+    - Doppler shift -- relative velocity / signal strength
+    - temporal channel correlation
+     
+- image data:
+    - refine AoA or AoD, by aligning spatial features in the image
+- output predicted user location, velocity
 """
 
 if __name__ == '__main__':
