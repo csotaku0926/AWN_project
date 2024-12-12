@@ -13,7 +13,8 @@ TOTAL_BW = 5e8 # total bandwidth is 0.5 GHz
 AN_SPACING = 0.5 # half antenna spacing
 N_ANN = 128
 N_CR = 32
-WVLEN = CR_FREQ / 3e8
+C = 3e8
+WVLEN = CR_FREQ / C
 N_SRC = 1
 D = 0.5
 
@@ -150,7 +151,7 @@ def get_channel_gain(H:np.array, per='ant'):
     return gain
 
 
-def get_path_delay(H:np.array, threshold=0.1, do_plot=False):
+def get_path_delay(H:np.array, threshold=1.0, do_plot=False):
     """
     Estimate path delay leverage the time-domain proporties of channel response
 
@@ -174,7 +175,7 @@ def get_path_delay(H:np.array, threshold=0.1, do_plot=False):
 
         # normalize and detect peaks
         max_h_t_mag = np.max(h_t_mag)
-        peak_indices = np.where(h_t_mag > threshold * max_h_t_mag)[0]
+        peak_indices = np.where(h_t_mag >= threshold * max_h_t_mag)[0]
         
         # convert indices to delay
         delay_time = peak_indices / (sc_spacing * n_sc)
@@ -193,22 +194,86 @@ def get_path_delay(H:np.array, threshold=0.1, do_plot=False):
     return delays
 
 
-def get_doppler(H_3d:np.array, symbol_duration):
+def get_doppler(H:np.array, symbol_duration=1e-3, do_plot=False):
     """
     Estimate Doppler Shift from OFDM channel matrix
     
     parameters
-    - `H_3d`: a sequence containing multiple Hs along timeslots
+    - `H`: a sequence containing multiple Hs along timeslots, shape: (n_time, n_ant, n_sc)
+    - `symbol_duration`: OFDM symbol duration (s) (assumed)
+
+    return
+    doppler shift array, shape: (`n_ant`, `n_sc`)
     """
-    n_sym, n_ant, n_sc = H_3d.shape
-    doppler_shifts = []
+    n_sym, n_ant, n_sc = H.shape
+    doppler_shifts = np.zeros((n_ant, n_sc))
 
     for m in range(n_ant):
         for f in range(n_sc):
-            h_k = H_3d[:, m, f]
+            # extract channel response for each antenna and sub-carrier
+            h_k = H[:, m, f]
 
-            # DFT over time domain to find Doppler spectrum
-            
+            # compute DFT to get Doppler spectrum
+            doppler_spectrum = np.fft.fftshift(np.fft.fft(h_k))
+            freqs = np.fft.fftshift(np.fft.fftfreq(n_sym, d=symbol_duration))
+
+            # find doppler corresponding to peak of spectrum
+            peak_index = np.argmax(np.abs(doppler_spectrum) ** 2)
+            doppler_shift = freqs[peak_index]
+            doppler_shifts[m, f] = doppler_shift
+
+            # plot (optional)
+            if (do_plot and m == 0 and f == 0):
+                plt.figure()
+                plt.plot(freqs, np.abs(doppler_spectrum))
+                plt.title(f"Antenna {m}, SC {f}")
+                plt.xlabel("doppler freq")
+                plt.ylabel("Magnitude")
+                plt.grid()
+                plt.show()
+    
+    return doppler_shifts
+
+
+def get_temporal_correlation(H:np.array, symbol_duration=1e-3, max_lag=None, do_plot=False):
+    """
+    Compute temporal channel correlation of OFDM channel matrices
+
+    - `H`: 3D OFDM channel array
+    - `symbol_duration`: duration of one OFDM symbol
+    - `max_lag`: maximum lag to compute correlation
+    """
+    n_sym, n_ant, n_sc = H.shape
+    if (max_lag is None):
+        max_lag = n_sym - 1
+    
+    # focus on single antenna and sc
+    h_k = H[:, 0, 0]
+    # normalize
+    h_k = h_k / np.sqrt(np.mean(np.abs(h_k) ** 2))
+
+    # compute temporal correlation for each lag
+    lags = np.arange(0, max_lag + 1)
+    correlation = []
+    for lag in lags:
+        corr = np.mean(h_k[:n_sym - lag] * np.conj(h_k[lag : n_sym]))
+        correlation.append(corr)
+
+    correlation = np.array(correlation)
+    time_lags = lags * symbol_duration
+
+    # plot (optional)
+    if (do_plot):
+        plt.figure()
+        plt.plot(time_lags, np.abs(correlation), marker='o')
+        plt.title("Temporal Channel Correlation")
+        plt.xlabel("Time Lag (s)")
+        plt.ylabel("Correlation Magnitude")
+        plt.grid()
+        plt.show()
+
+    return time_lags, correlation
+
 
 """
 TODO:
@@ -218,19 +283,16 @@ TODO:
 channel parameters prediction --> sensing aided refinition (?) --> predicted channel states
 
 - channel states: 
-    - AoA and AoD -- AoA estimation, MUSIC algorithm
+    - AoA -- AoA estimation, MUSIC algorithm
     - path gain -- compute norm of signal's multipath components
     - path delay -- IFFT peak detection
     - Doppler shift -- relative velocity / signal strength
-    - temporal channel correlation
      
 - image data:
-    - refine AoA or AoD, by aligning spatial features in the image
 
 - output predicted user location, velocity
 """
-
-if __name__ == '__main__':
+def main():
     df = process_mat("colo_direct_wireless_dataset")
     loc = df.iloc[0]["loc"]
 
@@ -245,9 +307,19 @@ if __name__ == '__main__':
 
     # path gain
     gain = get_channel_gain(chnl)
+    print("channel gain shape:", gain.shape)
 
     # path loss
     for i in [0, 20, 40]:
         ch = df.iloc[i]["channel"].T
-        delays = get_path_delay(ch, threshold=0.5)
+        delays = get_path_delay(ch, threshold=1.0)
         print(delays[0])
+
+    # Doppler shift
+    Hs = [df.iloc[i]["channel"].T for i in range(10)]
+    Hs = np.stack(Hs, axis=0) # (#time, channel.shape)
+    dp_spectrum = get_doppler(Hs)
+
+
+if __name__ == '__main__':
+    main()
