@@ -14,6 +14,26 @@ from channel_param import *
 
 SCENARIO = "colo_cams"
 IMG_DIR = f"../../data/single_scenario/{SCENARIO}"
+BS_POS = (45, 0)
+
+def estimate_pos(AoA_deg, path_delay, tx_pos):
+    """
+    return
+    estimate coord, shape: (B, 2)
+    """
+    distance = (C * path_delay) / 2
+
+    AoA_rad = np.radians(AoA_deg)
+
+    x = tx_pos[0] + distance * np.cos(AoA_rad)
+    y = tx_pos[1] + distance * np.sin(AoA_rad)
+
+    x = torch.unsqueeze(x, 1)
+    y = torch.unsqueeze(y, 1)
+    out = torch.cat((x, y), axis=1)
+
+    return out
+
 
 class UserTrackingDataset(Dataset):
     """
@@ -201,8 +221,11 @@ class UserTrackingDataset(Dataset):
 class UserTrackingModel(nn.Module):
     """
     Using NN to refine user tracking with image data
+
+    Output:
+    predicted user position, channel states (AoA, delay, ...)
     """
-    def __init__(self, n_wireless_features=3, img_size=64, output_size=2):
+    def __init__(self, n_wireless_features=3, img_size=64, output_size=4):
         super(UserTrackingModel, self).__init__()
 
         self.n_wireless_features = n_wireless_features
@@ -226,25 +249,60 @@ class UserTrackingModel(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
-        self.img_fc = nn.Linear(64 * img_size * img_size, 64)
+        self.img_fc = nn.Linear(64 * 8 * 8, 64)
+
+        # CNN for depth maps
+        self.dm_cnn = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+        )
+        self.dmm_fc = nn.Linear(64 * 8 * 8, 64)
 
         # Combined branch
         self.combined_fc = nn.Linear(64 + 32 + 64, 32)
         self.out_fc = nn.Linear(32, self.output_size)
 
 
-    def forward(self, wireless_data, gain, images):
+    def forward(self, wireless_data, images, dm):
         """
-        wireless_data: ([_doppler, aoa, delay], _gain,)
+        parameters:
+        - `wireless_data`: ([_doppler, aoa, delay], _gain,)
+        - `images`, `dm` : (B, 3, 64, 64) RGB and depth maps
         """
+        _wireless_data, gain = wireless_data
         # process channel data
         _gain = self.path_gain_fc(gain)
 
+        # intial estimate
+        aoa, delay = _wireless_data[:, 1], _wireless_data[:, 2]
+        est_pos = estimate_pos(aoa, delay, BS_POS)
+
         # _gain + doppler + aoa + delay
-        _wl_input = torch.cat((_gain, wireless_data), dim=1)
+        _wl_input = torch.cat((_gain, _wireless_data), dim=1)
         _wl_output = self.wireless_fc(_wl_input)
 
-        return _wl_output
+        # image
+        _img_cnn = self.cnn(images)
+        _img_cnn = _img_cnn.view(_img_cnn.size(0), -1) # flatten cnn output
+        _img = self.img_fc(_img_cnn) # (B, 64)
+
+        # depth maps
+        _dm_cnn = self.dm_cnn(dm)
+        _dm_cnn = _dm_cnn.view(_dm_cnn.size(0), -1)
+        _dm = self.img_fc(_dm_cnn) # (B, 64)
+
+        _comb_input = torch.cat((_wl_output, _img, _dm), dim=1)
+        _comb = self.combined_fc(_comb_input)
+        output = self.out_fc(_comb)
+
+        return output
 
 
 def main():

@@ -2,19 +2,6 @@ from channel_param import *
 from img_processing import *
 import torch.optim as optim
 
-BS_POS = (45, 0)
-
-def estimate_pos(AoA_deg, path_delay, tx_pos=(0, 0)):
-    distance = (C * path_delay) / 2
-
-    AoA_rad = np.radians(AoA_deg)
-
-    x = tx_pos[0] + distance * np.cos(AoA_rad)
-    x = float(x[0])
-    y = tx_pos[1] + distance * np.sin(AoA_rad)
-    y = float(y[0])
-    return (x, y)
-
 
 def estimate_vec(doppler_shifts, aoa_degs):
     """
@@ -35,6 +22,29 @@ def estimate_vec(doppler_shifts, aoa_degs):
     return est_vec
 
 
+def get_ground_truth_channel(UE_pos, BS_pos=BS_POS):
+    """
+    Calculate channel states (AoA, path delay) based on ground turth UE position
+
+    returns:
+    AoA, path delay
+    """
+    # extract coord
+    x_ue, y_ue = UE_pos
+    x_bs, y_bs = BS_pos
+    dx = x_ue - x_bs
+    dy = y_ue - y_bs
+
+    # path delay
+    dist = np.sqrt(dx ** 2 + dy ** 2)
+    path_delay = dist / C
+
+    # Azimuth angle
+    azimuth = np.arctan2(dy, dx)
+
+    return azimuth, path_delay
+
+
 def train_model(model:UserTrackingModel, dataloader:DataLoader, 
                 n_epoch=10, lr=0.001):
     """
@@ -52,12 +62,12 @@ def train_model(model:UserTrackingModel, dataloader:DataLoader,
 
         for batch in dataloader:
             img_data, dm_data, _wireless_data, _gain, coord = batch
-
+            wireless_data = (_wireless_data, _gain)
             # zero gradient
             optimizer.zero_grad()
 
             # forward pass
-            outputs = model(_wireless_data, _gain, img_data)
+            outputs = model(wireless_data, img_data, dm_data) # (B, 4)
 
             print(outputs.shape)
 
@@ -91,25 +101,25 @@ def foo():
     path_delay2 = get_path_delay(chnl2)[0]
 
     print(loc)
-    print(estimate_pos(est_AoA, path_delay, BS_POS))
-    print(estimate_pos(est_AoA2, path_delay2, BS_POS))
+    # print(estimate_pos(est_AoA, path_delay, BS_POS))
+    # print(estimate_pos(est_AoA2, path_delay2, BS_POS))
 
-    # requires sequences of H
-    locs = df.iloc[:idx]["loc"]
+    # # requires sequences of H
+    # locs = df.iloc[:idx]["loc"]
 
-    Hs = [df.iloc[i]["channel"].T for i in range(3)]
-    Hs = np.stack(Hs, axis=0) # (#time, channel.shape)
+    # Hs = [df.iloc[i]["channel"].T for i in range(3)]
+    # Hs = np.stack(Hs, axis=0) # (#time, channel.shape)
 
-    dp_spectrum = get_doppler(Hs) # (idx, `N_CR`, `N_ANN`)
-    dp = np.median(dp_spectrum[:, 0])
+    # dp_spectrum = get_doppler(Hs) # (idx, `N_CR`, `N_ANN`)
+    # dp = np.median(dp_spectrum[:, 0])
 
-    Hs2 = [df.iloc[i]["channel"].T for i in range(1, 4)]
-    Hs2 = np.stack(Hs2, axis=0) # (#time, channel.shape)
+    # Hs2 = [df.iloc[i]["channel"].T for i in range(1, 4)]
+    # Hs2 = np.stack(Hs2, axis=0) # (#time, channel.shape)
 
-    dp_spectrum2 = get_doppler(Hs2) # (idx, `N_CR`, `N_ANN`)
-    dp2 = np.median(dp_spectrum2[:, 0])
+    # dp_spectrum2 = get_doppler(Hs2) # (idx, `N_CR`, `N_ANN`)
+    # dp2 = np.median(dp_spectrum2[:, 0])
 
-    print(estimate_vec([dp, dp2], [est_AoA, est_AoA2]))
+    # print(estimate_vec([dp, dp2], [est_AoA, est_AoA2]))
 
 
 def main():
@@ -121,4 +131,10 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    # main()
+    a = torch.zeros(7)
+    a = torch.unsqueeze(a, 1)
+    b = torch.zeros(7)
+    b = torch.unsqueeze(b, 1)
+    c = torch.cat((a, b), axis=1)
+    print(c.shape)
