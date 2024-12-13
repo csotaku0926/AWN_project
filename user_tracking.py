@@ -3,24 +3,6 @@ from img_processing import *
 import torch.optim as optim
 
 
-def estimate_vec(doppler_shifts, aoa_degs):
-    """
-    Estimate user velocity in 2D using Doppler shifts and AoAs
-
-    returns estimated velocity vector (vx, vy) in m/s
-    """
-    aoa_rads = np.radians(aoa_degs)
-
-    # v * cos(theta) = fd * c / fc
-    # this can be solved using LS
-    A = np.vstack((np.cos(aoa_rads), np.sin(aoa_rads))).T
-    b = np.array(doppler_shifts) * C / CR_FREQ
-
-    # LS
-    est_vec, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
-
-    return est_vec
-
 
 def get_ground_truth_channel(UE_pos, BS_pos=BS_POS):
     """
@@ -131,10 +113,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # main()
-    a = torch.zeros(7)
-    a = torch.unsqueeze(a, 1)
-    b = torch.zeros(7)
-    b = torch.unsqueeze(b, 1)
-    c = torch.cat((a, b), axis=1)
-    print(c.shape)
+    main()

@@ -35,6 +35,25 @@ def estimate_pos(AoA_deg, path_delay, tx_pos):
     return out
 
 
+def estimate_vec(doppler_shifts, aoa_degs):
+    """
+    Estimate user velocity in 2D using Doppler shifts and AoAs
+
+    returns estimated velocity vector (vx, vy) in m/s
+    """
+    aoa_rads = np.radians(aoa_degs)
+
+    # v * cos(theta) = fd * c / fc
+    # this can be solved using LS
+    A = np.vstack((np.cos(aoa_rads), np.sin(aoa_rads))).T
+    b = np.array(doppler_shifts) * C / CR_FREQ
+
+    # LS
+    est_vec, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+
+    return est_vec
+
+
 class UserTrackingDataset(Dataset):
     """
     dataset for loading RGB images and depth maps
@@ -187,9 +206,14 @@ class UserTrackingDataset(Dataset):
             _gain = get_channel_gain(_chnl) # (`N_ANN`)
 
             # Doppler shifts
-            # if df_idx < 10 pick 0 ~ 10
-            # else pick df_idx-10 ~ df_idx
-            Hs = [self.wireless_df.iloc[i]["channel"].T for i in range(max(df_idx-10, 0), max(df_idx, 10))]
+            # past shifts
+            Hs_past = [self.wireless_df.iloc[i]["channel"].T for i in range(max(df_idx-4, 0), max(df_idx, 4))]
+            Hs_past = np.stack(Hs_past, axis=0)
+            _doppler_past = get_doppler(Hs_past)
+
+            # if df_idx < 5 pick 0 ~ 5
+            # else pick df_idx-5 ~ df_idx
+            Hs = [self.wireless_df.iloc[i]["channel"].T for i in range(max(df_idx-5, 0), max(df_idx, 5))]
             Hs = np.stack(Hs, axis=0)
             _doppler = get_doppler(Hs)
 
@@ -204,11 +228,13 @@ class UserTrackingDataset(Dataset):
         coord = [float(x), float(y)]
         coord = torch.tensor(coord, dtype=torch.float32)
 
+        _doppler_past_med = np.median(_doppler_past[:, 0])
         _doppler_med = np.median(_doppler[:, 0])
         
         _wireless_data = torch.tensor(
-            np.array([_doppler_med, _aoa, _delay[0]])
-        , dtype=torch.float32)
+            np.array([_doppler_past_med, _doppler_med, _aoa, _delay[0]]), 
+            dtype=torch.float32
+        )
 
         _gain = torch.tensor(_gain, dtype=torch.float32)
 
@@ -225,7 +251,7 @@ class UserTrackingModel(nn.Module):
     Output:
     predicted user position, channel states (AoA, delay, ...)
     """
-    def __init__(self, n_wireless_features=3, img_size=64, output_size=4):
+    def __init__(self, n_wireless_features=4, img_size=64, output_size=4):
         super(UserTrackingModel, self).__init__()
 
         self.n_wireless_features = n_wireless_features
@@ -234,7 +260,7 @@ class UserTrackingModel(nn.Module):
 
         # wireless data branch
         self.path_gain_fc = nn.Linear(N_ANN, 64)
-        # AoA, path delay, doppler
+        # AoA, path delay, doppler, past doppler
         self.wireless_fc = nn.Linear(64 + n_wireless_features, 32) # e.g.: 64 + 3 (aoa, path delay, doppler)
 
         # CNN for image data
@@ -273,7 +299,7 @@ class UserTrackingModel(nn.Module):
     def forward(self, wireless_data, images, dm):
         """
         parameters:
-        - `wireless_data`: ([_doppler, aoa, delay], _gain,)
+        - `wireless_data`: ([_doppler_past, _doppler, aoa, delay] (all of shape (B, )), _gain,)
         - `images`, `dm` : (B, 3, 64, 64) RGB and depth maps
         """
         _wireless_data, gain = wireless_data
@@ -281,7 +307,7 @@ class UserTrackingModel(nn.Module):
         _gain = self.path_gain_fc(gain)
 
         # intial estimate
-        aoa, delay = _wireless_data[:, 1], _wireless_data[:, 2]
+        aoa, delay = _wireless_data[:, 2], _wireless_data[:, 3]
         est_pos = estimate_pos(aoa, delay, BS_POS)
 
         # _gain + doppler + aoa + delay
