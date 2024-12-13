@@ -1,5 +1,4 @@
 import numpy as np
-import h5py
 import os
 
 import torch
@@ -8,6 +7,11 @@ import torchvision.transforms as tfs
 import skimage.io
 import scipy.io
 
+import torch.nn as nn
+import torch.nn.functional as F
+
+from channel_param import *
+
 SCENARIO = "colo_cams"
 IMG_DIR = f"../../data/single_scenario/{SCENARIO}"
 
@@ -15,26 +19,43 @@ class UserTrackingDataset(Dataset):
     """
     dataset for loading RGB images and depth maps
     """
-    def __init__(self, scenario="colo_cams", transforms=None, root_dir="../../data/single_scenario/"):
+    def __init__(self, scenario="colo_cams", resize_dim=64,
+                 wireless_mat_filename="colo_direct_wireless_dataset", 
+                transforms=None, root_dir="../../data/single_scenario/"):
         
         # filename format: cam_{cam_id}_{x coord}_{y coord}.jpg
-        self.filename_list = [] # key list : {x coord}_{y coord}
-        self.rgb_dm_filenames = {} # (cam_{cam_id}_{x coord}_{y coord} : [rgb_filename, dm_filename])
+        self.filename_list = [] # key list : {x coord * 10000}_{y coord * 10}
+        self.rgb_dm_filenames = {} # ({x coord * 10000}_{y coord * 10} : [rgb_filename, dm_filename])
+        self.wireless_dict = {} # {x coord * 10000}_{y coord * 10} : [df index]
+        self.d_wireless_coord = (633917, 0) # d + wireless.loc = img.loc
 
         # path stuff
         self.scenario = scenario
         self.root_dir = root_dir
         self.scenario_dir = os.path.join(self.root_dir, self.scenario)
-        
+        self.wireless_path = os.path.join(self.root_dir, wireless_mat_filename)
+
         # call
         self.read_images()
+        self.wireless_df = process_mat(wireless_mat_filename)
+
+        for i, data in self.wireless_df.iterrows():
+            coord = data["loc"]
+            k = str(int(round(coord[0], 4) * 10000) + self.d_wireless_coord[0]) + \
+                  "_" + str(int(coord[1] * 10) + self.d_wireless_coord[1])
+            self.wireless_dict[k] = i
+
+        # for k in self.wireless_dict.keys():
+        #     if (k[:2] == "63"):
+        #         print(k)
 
         # process image
         self.transforms = transforms
         if (transforms is not None):
             return
         
-        resize_trans = tfs.Resize((224, 224))
+        self.resize_dim = resize_dim
+        resize_trans = tfs.Resize((resize_dim, resize_dim))
         norm_trans = tfs.Normalize(mean=(0.306, 0.281, 0.251), std=(0.016, 0.0102, 0.013))
         self.transforms = tfs.Compose([
             tfs.ToPILImage(),
@@ -43,36 +64,68 @@ class UserTrackingDataset(Dataset):
             norm_trans,
         ])
 
+
     def read_images(self):
         rgb_path = os.path.join(self.scenario_dir, "rgb")
         rgb_filenames = os.listdir(rgb_path)
-        
-        # process filename
-        for fn in rgb_filenames:
-            fns = fn[:-4].split("_")
-            k = fns[2] + "_" + fns[3]
-            self.filename_list.append(k)
-            self.rgb_dm_filenames[k] = [fn]
 
         # depth maps in .mat format
         depth_path = os.path.join(self.scenario_dir, "depth_maps")
         depth_map_filenames = os.listdir(depth_path)
+       
+        # process filename
+        d1 = {}
+        for fn in rgb_filenames:
+            fns = fn[:-4].split("_")
 
+            _x = "".join(fns[2].split("."))
+            if (len(_x) == len(fns[2])):
+                # no digit in x filename
+                _x += "0000"
+            
+            _y = "".join(fns[3].split("."))
+            if (len(_y) == len(fns[3])):
+                _y += "0"
+
+            k = _x + "_" + _y # remove digit
+            d1[k] = fn
+
+        d2 = {}
         for fn in depth_map_filenames:
             fns = fn[:-4].split("_")
-            k = fns[2] + "_" + fns[3]
-            if (k in self.rgb_dm_filenames):
-                self.rgb_dm_filenames[k].append(fn)
+
+            _x = "".join(fns[2].split("."))
+            if (len(_x) == len(fns[2])):
+                # no digit in x filename
+                _x += "0000"
+            
+            _y = "".join(fns[3].split("."))
+            if (len(_y) == len(fns[3])):
+                _y += "0"
+
+            k = _x + "_" + _y # remove digit
+            d2[k] = fn
+            
+        for k in d1.keys():
+            if (k not in d2):
+                continue
+            self.filename_list.append(k)
+            self.rgb_dm_filenames[k] = [d1[k], d2[k]]
+
+        # print(self.filename_list)
 
 
     def __len__(self):
-        return len(self.rgb_dm_filenames)
+        # must have rgb and depth_map files
+        return len(self.filename_list)
     
     def __getitem__(self, index) -> dict:
         """
         returns
-        - (img_data, dm_data)
-        - img_data and dm_data are of (720, 1280, 3) shape
+        - "img" : img_data,
+        - "dm" : dm_data,
+        - "channel" : wireless_data,
+        - "coord" : coord,
         """
         k = self.filename_list[index]
         _files = self.rgb_dm_filenames[k]
@@ -82,9 +135,7 @@ class UserTrackingDataset(Dataset):
         jpg_filename = os.path.join(self.scenario_dir, "rgb", jpg_filename)
         img_data = skimage.io.imread(jpg_filename) # (720, 1280, 3)
         img_data = self.transforms(img_data) # (3, 224, 224)
-        
-        if (len(_files) < 2):
-            return img_data
+    
         
         # process .mat file
         dm_filename = _files[1]
@@ -94,23 +145,117 @@ class UserTrackingDataset(Dataset):
         dm_data = mat_f["depth"] # (720, 1280, 3)
         dm_data = self.transforms(dm_data) # (3, 224, 224)
 
-        # user coord label
-        x, y = k.split("_")
-        coord = (float(x), float(y))
-        coord = torch.tensor(coord)
+        # process wireless data
+        # AoA, single path delay, path gain, Doppler shift
+        _aoa, _gain, _delay, _doppler = None, None, None, None
 
-        ret = {
-            "img" : img_data,
-            "dm" : dm_data,
-            "coord" : coord,
-        }
+        if (k in self.wireless_dict):
+            df_idx = self.wireless_dict[k]
+            _loc = self.wireless_df.iloc[df_idx]["loc"]
+            _chnl = self.wireless_df.iloc[df_idx]["channel"]
 
-        return ret
+            # AoA estimation
+            _chnl = _chnl.T
+            spec, angles = music_algorithm(_chnl)
+            spec_idx = np.argmax(spec)
+            _aoa = angles[spec_idx]
+
+            # path delay
+            _delay = get_path_delay(_chnl)[0]
+
+            # path gain
+            _gain = get_channel_gain(_chnl) # (`N_ANN`)
+
+            # Doppler shifts
+            # if df_idx < 10 pick 0 ~ 10
+            # else pick df_idx-10 ~ df_idx
+            Hs = [self.wireless_df.iloc[i]["channel"].T for i in range(max(df_idx-10, 0), max(df_idx, 10))]
+            Hs = np.stack(Hs, axis=0)
+            _doppler = get_doppler(Hs)
+
+        else:
+            _x, _y = k.split("_")
+            x = int(_x) - self.d_wireless_coord[0]
+            y = int(_y) - self.d_wireless_coord[1]
+            print("[Warning]: coord ", (x, y), " not found in wireless data")
+
+        # user coord label (use from jpg)
+        _, _, x, y = _files[0][:-4].split("_")
+        coord = [float(x), float(y)]
+        coord = torch.tensor(coord, dtype=torch.float32)
+
+        _doppler_med = np.median(_doppler[:, 0])
+        
+        _wireless_data = torch.tensor(
+            np.array([_doppler_med, _aoa, _delay[0]])
+        , dtype=torch.float32)
+
+        _gain = torch.tensor(_gain, dtype=torch.float32)
+
+        # dict triggers weird error
+        return img_data, dm_data, \
+                _wireless_data, _gain, \
+                coord
+
+
+class UserTrackingModel(nn.Module):
+    """
+    Using NN to refine user tracking with image data
+    """
+    def __init__(self, n_wireless_features=3, img_size=64, output_size=2):
+        super(UserTrackingModel, self).__init__()
+
+        self.n_wireless_features = n_wireless_features
+        self.img_size = img_size
+        self.output_size = output_size
+
+        # wireless data branch
+        self.path_gain_fc = nn.Linear(N_ANN, 64)
+        # AoA, path delay, doppler
+        self.wireless_fc = nn.Linear(64 + n_wireless_features, 32) # e.g.: 64 + 3 (aoa, path delay, doppler)
+
+        # CNN for image data
+        self.cnn = nn.Sequential(
+            nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+        )
+        self.img_fc = nn.Linear(64 * img_size * img_size, 64)
+
+        # Combined branch
+        self.combined_fc = nn.Linear(64 + 32 + 64, 32)
+        self.out_fc = nn.Linear(32, self.output_size)
+
+
+    def forward(self, wireless_data, gain, images):
+        """
+        wireless_data: ([_doppler, aoa, delay], _gain,)
+        """
+        # process channel data
+        _gain = self.path_gain_fc(gain)
+
+        # _gain + doppler + aoa + delay
+        _wl_input = torch.cat((_gain, wireless_data), dim=1)
+        _wl_output = self.wireless_fc(_wl_input)
+
+        return _wl_output
+
 
 def main():
     ds = UserTrackingDataset()
-    img, dm, coord = ds[2]["img"], ds[2]["dm"], ds[2]["coord"]
-    print(img.shape, dm.shape, coord.shape)
+    print(len(ds))
+    dataloader = DataLoader(ds, batch_size=32, shuffle=False)
 
+    for batch in dataloader:
+        img_data, dm_data, _wireless_data, _gain, coord = batch
+        print(img_data.shape, dm_data.shape, _wireless_data.shape, _gain.shape, coord.shape)
+
+    
 if __name__ == '__main__':
     main()

@@ -5,7 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 DATA_PATH = "../../data/single_scenario/data_generation_package/data"
-N_IMG = 50
+N_IMG = 5000
 
 # parameters for OFDM channel matrix
 CR_FREQ = 6e10 # 60 GHz
@@ -295,7 +295,8 @@ channel parameters prediction --> sensing aided refinition (?) --> predicted cha
 def main():
     df = process_mat("colo_direct_wireless_dataset")
     loc = df.iloc[0]["loc"]
-
+    print(round(loc[0], 4))
+    
     # remember to transpose
     chnl = df.iloc[20]["channel"].T
     print("channel shape:", chnl.shape)
@@ -309,7 +310,7 @@ def main():
     gain = get_channel_gain(chnl)
     print("channel gain shape:", gain.shape)
 
-    # path loss
+    # path delay
     for i in [0, 20, 40]:
         ch = df.iloc[i]["channel"].T
         delays = get_path_delay(ch, threshold=1.0)

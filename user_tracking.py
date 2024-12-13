@@ -1,4 +1,6 @@
 from channel_param import *
+from img_processing import *
+import torch.optim as optim
 
 BS_POS = (45, 0)
 
@@ -12,6 +14,7 @@ def estimate_pos(AoA_deg, path_delay, tx_pos=(0, 0)):
     y = tx_pos[1] + distance * np.sin(AoA_rad)
     y = float(y[0])
     return (x, y)
+
 
 def estimate_vec(doppler_shifts, aoa_degs):
     """
@@ -31,13 +34,40 @@ def estimate_vec(doppler_shifts, aoa_degs):
 
     return est_vec
 
+
+def train_model(model:UserTrackingModel, dataloader:DataLoader, 
+                n_epoch=10, lr=0.001):
+    """
+    Start train process
+    """
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+
+    # print(model.path_gain_fc.weight.dtype)
+
+    # train loop
+    for epoch in range(1):
+        model.train()
+        running_loss = 0
+
+        for batch in dataloader:
+            img_data, dm_data, _wireless_data, _gain, coord = batch
+
+            # zero gradient
+            optimizer.zero_grad()
+
+            # forward pass
+            outputs = model(_wireless_data, _gain, img_data)
+
+            print(outputs.shape)
+
 """
 1. AoA and path delay to get initial estimate of user's position
 2. Doppler shift to estimate user's velocity
 3. Depth map to verify user's location within 3D env
 4. Use visual data to update user position based on env features
 """
-def main():
+def foo():
     df = process_mat("colo_direct_wireless_dataset")
     idx = 0
     loc = df.iloc[idx]["loc"]
@@ -80,6 +110,15 @@ def main():
     dp2 = np.median(dp_spectrum2[:, 0])
 
     print(estimate_vec([dp, dp2], [est_AoA, est_AoA2]))
+
+
+def main():
+    ds = UserTrackingDataset()
+    dataloader = DataLoader(ds, batch_size=32, shuffle=False)
+    model = UserTrackingModel()
+    
+    train_model(model, dataloader)
+
 
 if __name__ == '__main__':
     main()
