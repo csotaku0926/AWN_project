@@ -3,55 +3,64 @@ from img_processing import *
 import torch.optim as optim
 
 
-
-def get_ground_truth_channel(UE_pos, BS_pos=BS_POS):
-    """
-    Calculate channel states (AoA, path delay) based on ground turth UE position
-
-    returns:
-    AoA, path delay
-    """
-    # extract coord
-    x_ue, y_ue = UE_pos
-    x_bs, y_bs = BS_pos
-    dx = x_ue - x_bs
-    dy = y_ue - y_bs
-
-    # path delay
-    dist = np.sqrt(dx ** 2 + dy ** 2)
-    path_delay = dist / C
-
-    # Azimuth angle
-    azimuth = np.arctan2(dy, dx)
-
-    return azimuth, path_delay
-
-
 def train_model(model:UserTrackingModel, dataloader:DataLoader, 
-                n_epoch=10, lr=0.001):
+                n_epoch=10, lr=0.001, save_dir="model/"):
     """
     Start train process
     """
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"using {device} device")
+    model.to(device)
+
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
 
     # print(model.path_gain_fc.weight.dtype)
-
+    best_loss = 1e4
     # train loop
-    for epoch in range(1):
+    for epoch in range(n_epoch):
         model.train()
         running_loss = 0
+        print(f"Start episode {epoch + 1}")
 
         for batch in dataloader:
-            img_data, dm_data, _wireless_data, _gain, coord = batch
-            wireless_data = (_wireless_data, _gain)
-            # zero gradient
-            optimizer.zero_grad()
+            img_data, dm_data, _wireless_data, _gain, coord = batch # [(B, 3, 64, 64), (B, 3, 64, 64), (B, 4), (B, 128), (B, 2)]
 
             # forward pass
-            outputs = model(wireless_data, img_data, dm_data) # (B, 4)
+            _wireless_data = _wireless_data.to(device)
+            _gain = _gain.to(device)
+            img_data = img_data.to(device)
+            dm_data = dm_data.to(device)
+            # print(_wireless_data.is_cuda, _gain.is_cuda, img_data.is_cuda, dm_data.is_cuda, next(model.parameters()).is_cuda)
+            outputs = model(_wireless_data, _gain, img_data, dm_data) # (B, 4)
 
-            print(outputs.shape)
+            # compute loss
+            gt_channel = get_ground_truth_channel(coord) # (B, 2)
+            az, delay = gt_channel
+            az = torch.unsqueeze(az, 1)
+            delay = torch.unsqueeze(delay, 1)
+            gt_channel = torch.cat((az, delay), dim=1)
+            real_output = torch.cat((coord, gt_channel), dim=1)
+
+            real_output = real_output.to(device=device)
+            loss = criterion(outputs, real_output)
+
+            # zero gradient
+            optimizer.zero_grad()
+            # backward prop
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+
+        avg_loss = running_loss/len(dataloader)
+        print(f"Epoch [{epoch + 1}/{n_epoch}] Loss: {avg_loss:.4f}")
+        # save model if better loss
+        # can be load with `model.load_state_dict(torch.load)`
+        if (avg_loss < best_loss):
+            best_loss = avg_loss
+            save_path = os.path.join(save_dir, f"{avg_loss}.pt")
+            torch.save(model.state_dict(), save_path)
 
 """
 1. AoA and path delay to get initial estimate of user's position
@@ -109,7 +118,7 @@ def main():
     dataloader = DataLoader(ds, batch_size=32, shuffle=False)
     model = UserTrackingModel()
     
-    train_model(model, dataloader)
+    train_model(model, dataloader, n_epoch=100)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,6 @@
 import numpy as np
 import os
+import math
 
 import torch
 from torch.utils.data import Dataset, DataLoader
@@ -23,10 +24,10 @@ def estimate_pos(AoA_deg, path_delay, tx_pos):
     """
     distance = (C * path_delay) / 2
 
-    AoA_rad = np.radians(AoA_deg)
+    AoA_rad = torch.deg2rad(AoA_deg)
 
-    x = tx_pos[0] + distance * np.cos(AoA_rad)
-    y = tx_pos[1] + distance * np.sin(AoA_rad)
+    x = tx_pos[0] + distance * torch.cos(AoA_rad)
+    y = tx_pos[1] + distance * torch.sin(AoA_rad)
 
     x = torch.unsqueeze(x, 1)
     y = torch.unsqueeze(y, 1)
@@ -54,6 +55,29 @@ def estimate_vec(doppler_shifts, aoa_degs):
     return est_vec
 
 
+def get_ground_truth_channel(UE_pos:torch.tensor, BS_pos=BS_POS) -> tuple:
+    """
+    Calculate channel states (AoA, path delay) based on ground turth UE position
+
+    returns:
+    AoA, path delay
+    """
+    # extract coord
+    x_ue, y_ue = UE_pos[:, 0], UE_pos[:, 1]
+    x_bs, y_bs = BS_pos
+    dx = x_ue - x_bs
+    dy = y_ue - y_bs
+
+    # path delay
+    dist = torch.sqrt(dx ** 2 + dy ** 2)
+    path_delay = dist / C
+
+    # Azimuth angle
+    azimuth = torch.arctan2(dy, dx)
+
+    return azimuth, path_delay
+
+
 class UserTrackingDataset(Dataset):
     """
     dataset for loading RGB images and depth maps
@@ -66,7 +90,6 @@ class UserTrackingDataset(Dataset):
         self.filename_list = [] # key list : {x coord * 10000}_{y coord * 10}
         self.rgb_dm_filenames = {} # ({x coord * 10000}_{y coord * 10} : [rgb_filename, dm_filename])
         self.wireless_dict = {} # {x coord * 10000}_{y coord * 10} : [df index]
-        self.d_wireless_coord = (633917, 0) # d + wireless.loc = img.loc
 
         # path stuff
         self.scenario = scenario
@@ -80,13 +103,36 @@ class UserTrackingDataset(Dataset):
 
         for i, data in self.wireless_df.iterrows():
             coord = data["loc"]
-            k = str(int(round(coord[0], 4) * 10000) + self.d_wireless_coord[0]) + \
-                  "_" + str(int(coord[1] * 10) + self.d_wireless_coord[1])
-            self.wireless_dict[k] = i
 
-        # for k in self.wireless_dict.keys():
-        #     if (k[:2] == "63"):
-        #         print(k)
+            _x = str(math.ceil(coord[0] * 10000.0))
+            _xf = str(math.floor(coord[0] * 10000.0))
+            _x0 = str(math.ceil(coord[0] * 100000.0))
+            _xf0 = str(math.floor(coord[0] * 100000.0))
+
+            if (_x == "0"):
+                k_ceil = "00000_" + str(int(coord[1] * 10))
+                k_floor = "00000_" + str(int(coord[1] * 10))
+
+            elif (coord[0] < 1.0):
+                comp = "0"
+                if (coord[0] < 0.1):
+                    comp += "0"
+                
+                k_ceil = comp + _x + "_" + str(int(coord[1] * 10))
+                k_floor = comp + _xf + "_" + str(int(coord[1] * 10))
+                k_ceil0 = comp + _x0 + "_" + str(int(coord[1] * 10))
+                k_floor0 = comp + _xf0 + "_" + str(int(coord[1] * 10))
+
+                self.wireless_dict[k_ceil0] = i
+                self.wireless_dict[k_floor0] = i
+                
+            else:
+                k_ceil = _x + "_" + str(int(coord[1] * 10))
+                k_floor = _xf + "_" + str(int(coord[1] * 10))
+                
+            self.wireless_dict[k_ceil] = i
+            self.wireless_dict[k_floor] = i
+
 
         # process image
         self.transforms = transforms
@@ -116,32 +162,40 @@ class UserTrackingDataset(Dataset):
         d1 = {}
         for fn in rgb_filenames:
             fns = fn[:-4].split("_")
-
-            _x = "".join(fns[2].split("."))
-            if (len(_x) == len(fns[2])):
-                # no digit in x filename
-                _x += "0000"
+            # make sure 4 digits
+            if ("." in fns[2]):
+                x_int, x_dig = fns[2].split(".")
+                x_dig += "0" * (4 - len(x_dig))
+                _x = "".join([x_int, x_dig])
+            else:
+                _x = fns[2] + "0000"
             
-            _y = "".join(fns[3].split("."))
-            if (len(_y) == len(fns[3])):
-                _y += "0"
-
+            if ('.' in fns[3]):
+                y_int, y_dig = fns[3].split(".")
+                _y = "".join([y_int, y_dig])
+            else:
+                _y = fns[3] + "0"
+                
             k = _x + "_" + _y # remove digit
             d1[k] = fn
 
         d2 = {}
         for fn in depth_map_filenames:
             fns = fn[:-4].split("_")
-
-            _x = "".join(fns[2].split("."))
-            if (len(_x) == len(fns[2])):
-                # no digit in x filename
-                _x += "0000"
+            # make sure 4 digits
+            if ("." in fns[2]):
+                x_int, x_dig = fns[2].split(".")
+                x_dig += "0" * (4 - len(x_dig))
+                _x = "".join([x_int, x_dig])
+            else:
+                _x = fns[2] + "0000"
             
-            _y = "".join(fns[3].split("."))
-            if (len(_y) == len(fns[3])):
-                _y += "0"
-
+            if ('.' in fns[3]):
+                y_int, y_dig = fns[3].split(".")
+                _y = "".join([y_int, y_dig])
+            else:
+                _y = fns[3] + "0"
+                
             k = _x + "_" + _y # remove digit
             d2[k] = fn
             
@@ -150,9 +204,7 @@ class UserTrackingDataset(Dataset):
                 continue
             self.filename_list.append(k)
             self.rgb_dm_filenames[k] = [d1[k], d2[k]]
-
-        # print(self.filename_list)
-
+        
 
     def __len__(self):
         # must have rgb and depth_map files
@@ -218,10 +270,7 @@ class UserTrackingDataset(Dataset):
             _doppler = get_doppler(Hs)
 
         else:
-            _x, _y = k.split("_")
-            x = int(_x) - self.d_wireless_coord[0]
-            y = int(_y) - self.d_wireless_coord[1]
-            print("[Warning]: coord ", (x, y), " not found in wireless data")
+            print(f"[Warning]:  (key: {k}) (index: {index}) not found in wireless data")
 
         # user coord label (use from jpg)
         _, _, x, y = _files[0][:-4].split("_")
@@ -251,7 +300,7 @@ class UserTrackingModel(nn.Module):
     Output:
     predicted user position, channel states (AoA, delay, ...)
     """
-    def __init__(self, n_wireless_features=4, img_size=64, output_size=4):
+    def __init__(self, n_wireless_features=6, img_size=64, output_size=4):
         super(UserTrackingModel, self).__init__()
 
         self.n_wireless_features = n_wireless_features
@@ -261,7 +310,7 @@ class UserTrackingModel(nn.Module):
         # wireless data branch
         self.path_gain_fc = nn.Linear(N_ANN, 64)
         # AoA, path delay, doppler, past doppler
-        self.wireless_fc = nn.Linear(64 + n_wireless_features, 32) # e.g.: 64 + 3 (aoa, path delay, doppler)
+        self.wireless_fc = nn.Linear(64 + n_wireless_features, 32) # e.g.: 64 + 6 (aoa, path delay, doppler, past_doppler, est_pos)
 
         # CNN for image data
         self.cnn = nn.Sequential(
@@ -296,22 +345,24 @@ class UserTrackingModel(nn.Module):
         self.out_fc = nn.Linear(32, self.output_size)
 
 
-    def forward(self, wireless_data, images, dm):
+    def forward(self, _wireless_data, gain, images, dm):
         """
         parameters:
-        - `wireless_data`: ([_doppler_past, _doppler, aoa, delay] (all of shape (B, )), _gain,)
+        - `wireless_data`: [_doppler_past, _doppler, aoa, delay] (all of shape (B, ))
+        - `gain`, : (B, N_ANN)
         - `images`, `dm` : (B, 3, 64, 64) RGB and depth maps
         """
-        _wireless_data, gain = wireless_data
         # process channel data
         _gain = self.path_gain_fc(gain)
 
         # intial estimate
         aoa, delay = _wireless_data[:, 2], _wireless_data[:, 3]
+        # dp_past, dp_now = _wireless_data[:, 0], _wireless_data[:, 1]
         est_pos = estimate_pos(aoa, delay, BS_POS)
+        # est_vec = estimate_vec([dp_past, dp_now])
 
         # _gain + doppler + aoa + delay
-        _wl_input = torch.cat((_gain, _wireless_data), dim=1)
+        _wl_input = torch.cat((_gain, _wireless_data, est_pos), dim=1)
         _wl_output = self.wireless_fc(_wl_input)
 
         # image
@@ -334,12 +385,16 @@ class UserTrackingModel(nn.Module):
 def main():
     ds = UserTrackingDataset()
     print(len(ds))
-    dataloader = DataLoader(ds, batch_size=32, shuffle=False)
+    dataloader = DataLoader(ds, batch_size=16, shuffle=False)
 
+    i = 0
     for batch in dataloader:
+        i += 1
         img_data, dm_data, _wireless_data, _gain, coord = batch
-        print(img_data.shape, dm_data.shape, _wireless_data.shape, _gain.shape, coord.shape)
+        print(img_data.shape, dm_data.shape, _wireless_data.shape, _gain.shape, coord.shape) # [(B, 3, 64, 64), (B, 3, 64, 64), (B, 4), (B, 128), (B, 2)]
 
     
+    # print("CUDA available:", torch.cuda.is_available()) # True
+
 if __name__ == '__main__':
     main()

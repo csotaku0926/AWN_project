@@ -38,7 +38,7 @@ def process_mat(task_name:str) -> pd.DataFrame:
 
         # location: (3, )
         loc_i = user_i["loc"][()]
-        loc_i = np.array(loc_i).flatten()
+        loc_i = np.array(loc_i, dtype=np.float32).flatten()
 
         # channel: (# OFDM symbol, # antenna) of `numpy.void` type data (e.g.: by default (32, 128) size of (-6.51345623e-07, -8.99951125e-07))
         chnl_i = user_i["channel"][()]
