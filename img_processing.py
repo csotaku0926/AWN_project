@@ -296,12 +296,23 @@ class UserTrackingDataset(Dataset):
 class UserTrackingModel(nn.Module):
     """
     Using NN to refine user tracking with image data
+    params:
+    - `use_wireless`: use wireless channel feature 
+    - `use_images`: use image and depth maps feature
 
     Output:
     predicted user position, channel states (AoA, delay, ...)
     """
-    def __init__(self, n_wireless_features=6, img_size=64, output_size=4):
+    def __init__(self, n_wireless_features=6, img_size=64, output_size=4, 
+                 use_wireless=True, use_images=True):
+        
+        # must use wireless or image features
+        assert(use_wireless or use_images), "You should either enable use_wireless or use_images"
+
         super(UserTrackingModel, self).__init__()
+
+        self.use_wireless = use_wireless
+        self.use_images = use_images
 
         self.n_wireless_features = n_wireless_features
         self.img_size = img_size
@@ -341,7 +352,13 @@ class UserTrackingModel(nn.Module):
         self.dmm_fc = nn.Linear(64 * 8 * 8, 64)
 
         # Combined branch
-        self.combined_fc = nn.Linear(64 + 32 + 64, 32)
+        combinsed_size = 160
+        if (self.use_wireless and not self.use_images):
+            combinsed_size = 32
+        elif (self.use_images and not self.use_wireless):
+            combinsed_size = 128
+
+        self.combined_fc = nn.Linear(combinsed_size, 32)
         self.out_fc = nn.Linear(32, self.output_size)
 
 
@@ -352,30 +369,39 @@ class UserTrackingModel(nn.Module):
         - `gain`, : (B, N_ANN)
         - `images`, `dm` : (B, 3, 64, 64) RGB and depth maps
         """
-        # process channel data
-        _gain = self.path_gain_fc(gain)
+        
+        if (self.use_wireless):
+            # process channel data
+            _gain = self.path_gain_fc(gain)
 
-        # intial estimate
-        aoa, delay = _wireless_data[:, 2], _wireless_data[:, 3]
-        # dp_past, dp_now = _wireless_data[:, 0], _wireless_data[:, 1]
-        est_pos = estimate_pos(aoa, delay, BS_POS)
-        # est_vec = estimate_vec([dp_past, dp_now])
+            # intial estimate
+            aoa, delay = _wireless_data[:, 2], _wireless_data[:, 3]
+            # dp_past, dp_now = _wireless_data[:, 0], _wireless_data[:, 1]
+            est_pos = estimate_pos(aoa, delay, BS_POS)
+            # est_vec = estimate_vec([dp_past, dp_now])
 
-        # _gain + doppler + aoa + delay
-        _wl_input = torch.cat((_gain, _wireless_data, est_pos), dim=1)
-        _wl_output = self.wireless_fc(_wl_input)
+            # _gain + doppler + aoa + delay
+            _wl_input = torch.cat((_gain, _wireless_data, est_pos), dim=1)
+            _wl_output = self.wireless_fc(_wl_input)
 
-        # image
-        _img_cnn = self.cnn(images)
-        _img_cnn = _img_cnn.view(_img_cnn.size(0), -1) # flatten cnn output
-        _img = self.img_fc(_img_cnn) # (B, 64)
+        if (self.use_images):
+            # image
+            _img_cnn = self.cnn(images)
+            _img_cnn = _img_cnn.view(_img_cnn.size(0), -1) # flatten cnn output
+            _img = self.img_fc(_img_cnn) # (B, 64)
 
-        # depth maps
-        _dm_cnn = self.dm_cnn(dm)
-        _dm_cnn = _dm_cnn.view(_dm_cnn.size(0), -1)
-        _dm = self.img_fc(_dm_cnn) # (B, 64)
+            # depth maps
+            _dm_cnn = self.dm_cnn(dm)
+            _dm_cnn = _dm_cnn.view(_dm_cnn.size(0), -1)
+            _dm = self.img_fc(_dm_cnn) # (B, 64)
 
-        _comb_input = torch.cat((_wl_output, _img, _dm), dim=1)
+        if (self.use_wireless and self.use_images):
+            _comb_input = torch.cat((_wl_output, _img, _dm), dim=1)
+        elif (self.use_wireless):
+            _comb_input = _wl_output
+        elif (self.use_images):
+            _comb_input = torch.cat((_img, _dm), dim=1)
+
         _comb = self.combined_fc(_comb_input)
         output = self.out_fc(_comb)
 
