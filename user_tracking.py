@@ -129,8 +129,10 @@ def eval_model(model:UserTrackingModel, dataloader:DataLoader,
 def plot_performances(model:UserTrackingModel, dataloader:DataLoader, 
                       weight_paths:list, labels:list, _save_ids=[]):
     """
+    Evaluate Model and save its performance
+
     param:
-    - `weight_paths`
+    - `weight_paths`: containing model paths to load and evaluate
     """
     # n_batch = len(dataloader)
     # my_xticks = [f"{i * batch_size}-{(i + 1) * batch_size - 1}" for i in range(0, n_batch)]
@@ -219,16 +221,15 @@ def main():
     ds = UserTrackingDataset()
     dataloader = DataLoader(ds, batch_size=bsize, shuffle=False)
     model = UserTrackingModel()
-    model.load_state_dict(torch.load("model/images.pt", weights_only=True))
 
-    train_model(model, dataloader, n_epoch=100)
+    # train_model(model, dataloader, n_epoch=100)
 
     # compare performances
-    weight_paths = ["model/wireless_images.pt"]#, "model/wireless.pt", "model/images.pt"]
+    weight_paths = ["model/8.36.pt", "model/9.7.pt"]
     labels = ["channel & image data fusion", "only channel data", "only image data"]
-    _save_ids = ["chnl_img", "chnl", "img"]
+    _save_ids = ["8_36", "9_7", "xx"]
 
-    # plot_performances(model, dataloader, weight_paths, labels, _save_ids)
+    plot_performances(model, dataloader, weight_paths, labels, _save_ids)
 
     # coords = []
     # coord1 = np.load(f"data/chnl_img_Estcoord.npy")
