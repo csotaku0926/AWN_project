@@ -4,7 +4,7 @@ import torch.optim as optim
 
 
 def train_model(model:UserTrackingModel, dataloader:DataLoader, 
-                n_epoch=10, lr=0.001, save_dir="model/"):
+                n_epoch=10, lr=0.001, save_dir="model/", use_wireless=True, use_images=True):
     """
     Start train process
     """
@@ -23,7 +23,8 @@ def train_model(model:UserTrackingModel, dataloader:DataLoader,
         running_loss = 0
         print(f"Start episode {epoch + 1}")
 
-        for batch in dataloader:
+        for i, batch in enumerate(dataloader):
+            print(f"{i}/{len(dataloader)} batches processed")
             img_data, dm_data, _wireless_data, _gain, coord = batch # [(B, 3, 64, 64), (B, 3, 64, 64), (B, 4), (B, 128), (B, 2)]
 
             # forward pass
@@ -59,7 +60,7 @@ def train_model(model:UserTrackingModel, dataloader:DataLoader,
         # can be load with `model.load_state_dict(torch.load)`
         if (avg_loss < best_loss):
             best_loss = avg_loss
-            save_path = os.path.join(save_dir, f"{avg_loss}.pt")
+            save_path = os.path.join(save_dir, f"{avg_loss}_{use_wireless}_{use_images}.pt")
             torch.save(model.state_dict(), save_path)
 
 
@@ -126,8 +127,9 @@ def eval_model(model:UserTrackingModel, dataloader:DataLoader,
 
     return xs, ys, ys_channel
 
-def plot_performances(model:UserTrackingModel, dataloader:DataLoader, 
-                      weight_paths:list, labels:list, _save_ids=[]):
+
+def plot_performances(dataloader:DataLoader, 
+                      weight_paths:list, labels:list, _save_ids=[], _usages=[]):
     """
     Evaluate Model and save its performance
 
@@ -140,10 +142,12 @@ def plot_performances(model:UserTrackingModel, dataloader:DataLoader,
     # plot coord
     xs, all_ys_chnl = [], []
     for i, w in enumerate(weight_paths):
+        model = UserTrackingModel(use_wireless=_usages[i][0], use_images=_usages[i][1])
         xs, ys, ys_chnl = eval_model(model, dataloader, w)
         # save eval result
         np.save(f"data/{_save_ids[i]}_Estcoord.npy", np.array(ys))
         all_ys_chnl.append(ys_chnl)
+        np.save(f"data/{_save_ids[i]}_Estchnl.npy", np.array(ys_chnl))
         # plot lines
         plt.plot(xs, ys, label=labels[i])
     
@@ -156,7 +160,7 @@ def plot_performances(model:UserTrackingModel, dataloader:DataLoader,
     # plot channel
     for i, chnl in enumerate(all_ys_chnl):
         plt.plot(xs, chnl, label=labels[i])
-        np.save(f"data/{_save_ids[i]}_Estchnl.npy", np.array(chnl))
+        # np.save(f"data/{_save_ids[i]}_Estchnl.npy", np.array(chnl))
     
     plt.xlabel("time")
     plt.ylabel("MSE error")
@@ -218,54 +222,59 @@ def main():
     4. Use visual data to update user position based on env features
     """
     bsize = 32
-    ds = UserTrackingDataset()
-    dataloader = DataLoader(ds, batch_size=bsize, shuffle=False)
-    model = UserTrackingModel()
+    # ds = UserTrackingDataset()
+    # dataloader = DataLoader(ds, batch_size=bsize, shuffle=False)
 
-    # train_model(model, dataloader, n_epoch=100)
+    use_wireless = False
+    use_images = True
+    # model = UserTrackingModel(use_wireless=use_wireless, use_images=use_images)
+    # model.load_state_dict(torch.load("model/3.52.pt", weights_only=True))
+
+    # train_model(model, dataloader, n_epoch=100, use_wireless=use_wireless, use_images=use_images)
 
     # compare performances
-    weight_paths = ["model/8.36.pt", "model/9.7.pt"]
+    weight_paths = ["model/images.pt", "model/6.1_img_only.pt", "model/wireless.pt"]
     labels = ["channel & image data fusion", "only channel data", "only image data"]
-    _save_ids = ["8_36", "9_7", "xx"]
+    _usages = [(True, True), (False, True), (True, True)]
+    _save_ids = ["C&I", "IMG", "WRL"]
 
-    plot_performances(model, dataloader, weight_paths, labels, _save_ids)
+    # plot_performances(dataloader, weight_paths, labels, _save_ids, _usages)
 
-    # coords = []
-    # coord1 = np.load(f"data/chnl_img_Estcoord.npy")
-    # coord2 = np.load(f"data/chnl_Estcoord.npy")
-    # coord3 = np.load(f"data/img_Estcoord.npy")
-    # coords.append(coord1)
-    # coords.append(coord2)
-    # coords.append(coord3)
+    coords = []
+    coord1 = np.load(f"data/WRL_Estcoord.npy")
+    coord2 = np.load(f"data/chnl_Estcoord.npy")
+    coord3 = np.load(f"data/img_Estcoord.npy")
+    coords.append(coord1)
+    coords.append(coord2)
+    coords.append(coord3)
 
-    # chnls = []
-    # chnl1 = np.load(f"data/chnl_img_Estchnl.npy")
-    # chnl2 = np.load(f"data/chnl_Estchnl.npy")
-    # chnl3 = np.load(f"data/img_Estchnl.npy")
-    # chnls.append(chnl1)
-    # chnls.append(chnl2)
-    # chnls.append(chnl3)
+    chnls = []
+    chnl1 = np.load(f"data/WRL_Estchnl.npy")
+    chnl2 = np.load(f"data/chnl_Estchnl.npy")
+    chnl3 = np.load(f"data/img_Estchnl.npy")
+    chnls.append(chnl1)
+    chnls.append(chnl2)
+    chnls.append(chnl3)
 
-    # xs = np.arange(len(coord1))
+    xs = np.arange(len(coord1))
 
-    # for i in range(3):
-    #     plt.plot(xs, coords[i], label=labels[i])
+    for i in range(3):
+        plt.plot(xs, coords[i], label=labels[i])
     
-    # plt.xlabel("time")
-    # plt.ylabel("MSE error")
-    # plt.legend()
-    # plt.savefig("coord_result.png")
-    # plt.show()
+    plt.xlabel("time")
+    plt.ylabel("MSE error")
+    plt.legend()
+    plt.savefig("coord_result.png")
+    plt.show()
 
-    # for i in range(3):
-    #     plt.plot(xs, chnls[i], label=labels[i])
+    for i in range(3):
+        plt.plot(xs, chnls[i], label=labels[i])
     
-    # plt.xlabel("time")
-    # plt.ylabel("MSE error")
-    # plt.legend()
-    # plt.savefig("chnl_result.png")
-    # plt.show()
+    plt.xlabel("time")
+    plt.ylabel("MSE error")
+    plt.legend()
+    plt.savefig("chnl_result.png")
+    plt.show()
 
 
 if __name__ == '__main__':

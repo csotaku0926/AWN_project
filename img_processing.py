@@ -393,7 +393,7 @@ class UserTrackingModel(nn.Module):
             # depth maps
             _dm_cnn = self.dm_cnn(dm)
             _dm_cnn = _dm_cnn.view(_dm_cnn.size(0), -1)
-            _dm = self.img_fc(_dm_cnn) # (B, 64)
+            _dm = self.dmm_fc(_dm_cnn) # (B, 64)
 
         if (self.use_wireless and self.use_images):
             _comb_input = torch.cat((_wl_output, _img, _dm), dim=1)
