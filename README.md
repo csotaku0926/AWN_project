@@ -1,4 +1,4 @@
-# AWS final project
+# AWN final project
 
 Code for vision-aided joint channel parameter estimation and user tracking
 
