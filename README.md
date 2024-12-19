@@ -6,6 +6,14 @@ Code for vision-aided joint channel parameter estimation and user tracking
 - `img_processing.py`: vision-aided channel refinement network
 - `main_module.py` : main module integrating the training progress
 
+## Preprocess
+You should download the corresponding data used in "Colocated-Camera Scenario with Direct View" case in [ViWi dataset](https://www.viwi-dataset.net/scenarios.html) first
+
+Put wireless channel data (a .mat file) in the path "{DATA_PATH}/{wireless_mat_filename}", where "DATA_PATH" defined in `channel_param.py` line 7, and "wireless_mat_filename" is the parameter of `UserTrackingDataset` `__init__`
+
+Put image data in the path "{root_dir}/{scenario}/rgb", where "root_dir" and "scenario" are parameters of `UserTrackingDataset` `__init__`
+Similarly, put depth map data in the path "{root_dir}/{scenario}/depth_maps"
+
 ## How to run
 1. create a virtual environment
     - `conda create -n my_env python=3.10`
