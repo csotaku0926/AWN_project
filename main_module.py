@@ -169,49 +169,49 @@ def plot_performances(dataloader:DataLoader,
     plt.show()
 
 
-def foo():
-    df = process_mat("colo_direct_wireless_dataset")
-    idx = 0
-    loc = df.iloc[idx]["loc"]
-    chnl = df.iloc[idx]["channel"]
+# def foo():
+#     df = process_mat("colo_direct_wireless_dataset")
+#     idx = 0
+#     loc = df.iloc[idx]["loc"]
+#     chnl = df.iloc[idx]["channel"]
 
-    idx2 = 1
-    loc2 = df.iloc[idx2]["loc"]
-    chnl2 = df.iloc[idx2]["channel"]
+#     idx2 = 1
+#     loc2 = df.iloc[idx2]["loc"]
+#     chnl2 = df.iloc[idx2]["channel"]
 
-    # AoA estimation
-    spectrums, angles = music_algorithm(chnl, n_source=N_SRC, wavelength=WVLEN)
-    spec_idx = np.argmax(spectrums)
-    est_AoA = angles[spec_idx]
+#     # AoA estimation
+#     spectrums, angles = music_algorithm(chnl, n_source=N_SRC, wavelength=WVLEN)
+#     spec_idx = np.argmax(spectrums)
+#     est_AoA = angles[spec_idx]
 
-    spectrums2, angles2 = music_algorithm(chnl2, n_source=N_SRC, wavelength=WVLEN)
-    spec_idx2 = np.argmax(spectrums2)
-    est_AoA2 = angles2[spec_idx2]
+#     spectrums2, angles2 = music_algorithm(chnl2, n_source=N_SRC, wavelength=WVLEN)
+#     spec_idx2 = np.argmax(spectrums2)
+#     est_AoA2 = angles2[spec_idx2]
 
-    # path delay
-    path_delay = get_path_delay(chnl)[0]
-    path_delay2 = get_path_delay(chnl2)[0]
+#     # path delay
+#     path_delay = get_path_delay(chnl)[0]
+#     path_delay2 = get_path_delay(chnl2)[0]
 
-    print(loc)
-    # print(estimate_pos(est_AoA, path_delay, BS_POS))
-    # print(estimate_pos(est_AoA2, path_delay2, BS_POS))
+#     print(loc)
+#     # print(estimate_pos(est_AoA, path_delay, BS_POS))
+#     # print(estimate_pos(est_AoA2, path_delay2, BS_POS))
 
-    # # requires sequences of H
-    # locs = df.iloc[:idx]["loc"]
+#     # # requires sequences of H
+#     # locs = df.iloc[:idx]["loc"]
 
-    # Hs = [df.iloc[i]["channel"].T for i in range(3)]
-    # Hs = np.stack(Hs, axis=0) # (#time, channel.shape)
+#     # Hs = [df.iloc[i]["channel"].T for i in range(3)]
+#     # Hs = np.stack(Hs, axis=0) # (#time, channel.shape)
 
-    # dp_spectrum = get_doppler(Hs) # (idx, `N_CR`, `N_ANN`)
-    # dp = np.median(dp_spectrum[:, 0])
+#     # dp_spectrum = get_doppler(Hs) # (idx, `N_CR`, `N_ANN`)
+#     # dp = np.median(dp_spectrum[:, 0])
 
-    # Hs2 = [df.iloc[i]["channel"].T for i in range(1, 4)]
-    # Hs2 = np.stack(Hs2, axis=0) # (#time, channel.shape)
+#     # Hs2 = [df.iloc[i]["channel"].T for i in range(1, 4)]
+#     # Hs2 = np.stack(Hs2, axis=0) # (#time, channel.shape)
 
-    # dp_spectrum2 = get_doppler(Hs2) # (idx, `N_CR`, `N_ANN`)
-    # dp2 = np.median(dp_spectrum2[:, 0])
+#     # dp_spectrum2 = get_doppler(Hs2) # (idx, `N_CR`, `N_ANN`)
+#     # dp2 = np.median(dp_spectrum2[:, 0])
 
-    # print(estimate_vec([dp, dp2], [est_AoA, est_AoA2]))
+#     # print(estimate_vec([dp, dp2], [est_AoA, est_AoA2]))
 
 
 def main():
@@ -221,60 +221,29 @@ def main():
     3. Depth map to verify user's location within 3D env
     4. Use visual data to update user position based on env features
     """
+    # dataset definition
     bsize = 32
-    # ds = UserTrackingDataset()
-    # dataloader = DataLoader(ds, batch_size=bsize, shuffle=False)
+    ds = UserTrackingDataset()
+    dataloader = DataLoader(ds, batch_size=bsize, shuffle=False)
 
-    use_wireless = False
+    # model settings
+    use_wireless = True
     use_images = True
-    # model = UserTrackingModel(use_wireless=use_wireless, use_images=use_images)
-    # model.load_state_dict(torch.load("model/3.52.pt", weights_only=True))
+    model = UserTrackingModel(use_wireless=use_wireless, use_images=use_images)
+    
+    ##### to train your model, enable this line: #####
+    train_model(model, dataloader, n_epoch=100, use_wireless=use_wireless, use_images=use_images)
 
-    # train_model(model, dataloader, n_epoch=100, use_wireless=use_wireless, use_images=use_images)
+    # evaluate performances
+    ##### put your model weight path below #####
+    weight_paths = ["model/your_model_weight.pt"]
+    
+    labels = ["Your data"]
+    _usages = [(True, True)]
+    _save_ids = ["your_saved_data"]
 
-    # compare performances
-    weight_paths = ["model/images.pt", "model/6.1_img_only.pt", "model/wireless.pt"]
-    labels = ["channel & image data fusion", "only channel data", "only image data"]
-    _usages = [(True, True), (False, True), (True, True)]
-    _save_ids = ["C&I", "IMG", "WRL"]
-
+    ###### to see how your model perform, enable the following line: #####
     # plot_performances(dataloader, weight_paths, labels, _save_ids, _usages)
-
-    coords = []
-    coord1 = np.load(f"data/WRL_Estcoord.npy")
-    coord2 = np.load(f"data/chnl_Estcoord.npy")
-    coord3 = np.load(f"data/img_Estcoord.npy")
-    coords.append(coord1)
-    coords.append(coord2)
-    coords.append(coord3)
-
-    chnls = []
-    chnl1 = np.load(f"data/WRL_Estchnl.npy")
-    chnl2 = np.load(f"data/chnl_Estchnl.npy")
-    chnl3 = np.load(f"data/img_Estchnl.npy")
-    chnls.append(chnl1)
-    chnls.append(chnl2)
-    chnls.append(chnl3)
-
-    xs = np.arange(len(coord1))
-
-    for i in range(3):
-        plt.plot(xs, coords[i], label=labels[i])
-    
-    plt.xlabel("time")
-    plt.ylabel("MSE error")
-    plt.legend()
-    plt.savefig("coord_result.png")
-    plt.show()
-
-    for i in range(3):
-        plt.plot(xs, chnls[i], label=labels[i])
-    
-    plt.xlabel("time")
-    plt.ylabel("MSE error")
-    plt.legend()
-    plt.savefig("chnl_result.png")
-    plt.show()
 
 
 if __name__ == '__main__':
